@@ -59,7 +59,7 @@ void saveToFile(FILE* fileIn, FILE* fileOut, Symbol* symbols, BinTree* tree,
     //now, file format is: [FILE_INFO],[FILE_NAME],[DATA],position
     //time to save the tree
 
-    //treeToFile(fileOut, tree);
+    treeToFile(fileOut, tree);
 }
 
 int loadFromFile(FILE* fileIn) {
@@ -188,7 +188,7 @@ u32 encodeFile(FILE* fileIn, FILE* fileOut, Symbol* symbols) {
     //symbols[] - array of symbols from fileIn with filled "path" fields
     BitMask mask;
     int     i;
-    u32     count; //byte-blocks count
+    u32     count = 0; //byte-blocks count
 
     bitMaskInit(&mask);
     while ( (i = fgetc(fileIn)) != EOF ) {
@@ -229,8 +229,6 @@ void decodeFile(FILE* fileIn, FILE* fileOut, u64 fileLen, const BinTree* root) {
             temp = tmp == (u8)0 ? temp->left : temp->right;
 
             if ( binTreeIsLeaf(temp) ) {
-                //fprintf(fileOut, "%c", ((Symbol*)temp->key.ptr)->sym);
-                //fprintf(fileOut, "%c", (s8)temp->key.val);
                 fwrite((const void*)&temp->key.val, sizeof(s8), 1, fileOut);
                 temp = root;
                 fileLen--;
@@ -337,9 +335,9 @@ int main(int argc, char** argv) {
     rewind(fileIn);
     saveToFile(fileIn, fileOut, symbols, root, argv[2], fileLen);
 
-    /*fclose(fileOut);
+    fclose(fileOut);
     fileOut = fopen(argv[2], "rb");
-    loadFromFile(fileOut);*/
+    loadFromFile(fileOut);
 
     /*encodeFile(fileIn, fileOut, symbols);
 
