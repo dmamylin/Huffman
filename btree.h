@@ -18,7 +18,7 @@ typedef struct BinTree {
 
 void binTreeRemove(BinTree*  root);
 int  binTreeInit  (BinTree** root);
-int  binTreeIsLeaf(BinTree*  root);
+int  binTreeIsLeaf(const BinTree*  root);
 
 void binTreeRemove(BinTree* root) {
 	if ( root ) { //remove if root != NULL. If root == NULL - already removed.
@@ -39,12 +39,12 @@ int binTreeInit(BinTree** root) {
 	}
 
 	(*root)->left    = (*root)->right = NULL;
-    (*root)->key.ptr = NULL; 
-    
+    (*root)->key.ptr = NULL;
+
 	return TRUE;
 }
 
-int binTreeIsLeaf(BinTree* root) {
+int binTreeIsLeaf(const BinTree* root) {
 	return !root->left && !root->right;
 }
 

@@ -7,18 +7,19 @@
 #include "stack.h"
 #include "bitMask.h"
 
-#define ARRAY_LENGTH    256
-
-typedef struct {
-    u32   freq; //frequency
-    char  sym;
-    char  path[ARRAY_LENGTH + 1];
-} Symbol;
-
 int  compareSym(const void*, const void*);
+
 void readFile(FILE* file, Symbol* symbols, u64* fileLen);
+void saveToFile(FILE* fileIn, FILE* fileOut, Symbol* symbols, BinTree* tree,
+              const char* name, u64 len);
+int  loadFile(FILE* fileIn, BinTree** root);
+
 void pushOrdered(Stack* stack, BinTree* newNode);
 void createPath(BinTree* tree, int depth);
+void treeToFile(FILE* fileOut, BinTree* tree);
+void treeFromFile(FILE* fileIn, BinTree** tree);
+u32  encodeFile(FILE* fileIn, FILE* fileOut, Symbol* symbols); //converting tree to binary sequence
+void decodeFile(FILE* fileIn, FILE* fileOut, u64 fileLen, const BinTree* root);
 
 int compareSym(const void* s1, const void* s2) {
     return (*(Symbol**)s1)->freq - (*(Symbol**)s2)->freq;
@@ -33,6 +34,49 @@ void readFile(FILE* file, Symbol* symbols, u64* fileLen) {
     }
 }
 
+void saveToFile(FILE* fileIn, FILE* fileOut, Symbol* symbols, BinTree* tree,
+              const char* name, u64 len) {
+    FileInfo info;
+    const char pref[] = FILE_PREFIX;
+    fpos_t pos;
+
+    memcpy((void*)info.prefix, pref, sizeof(s8) * 4);
+    info.fileLen     = len;
+    info.blocksCount = 0;
+    info.nameLen     = strlen(name);
+
+    fwrite((const void*)&info, sizeof(FileInfo), 1, fileOut); //write info prefix
+    fwrite((const void*)name, sizeof(char), info.nameLen, fileOut); //write filename
+
+    info.blocksCount = encodeFile(fileIn, fileOut, symbols);
+
+    fgetpos(fileOut, &pos); //get current position
+    fseek(fileOut, 0, SEEK_SET); //reset fileOut stream
+
+    fwrite((const void*)&info, sizeof(FileInfo), 1, fileOut); //write updated info
+
+    fsetpos(fileOut, &pos); //restore position
+    //now, file format is: [FILE_INFO],[FILE_NAME],[DATA],position
+    //time to save the tree
+
+    treeToFile(fileOut, tree);
+}
+
+int loadFile(FILE* fileIn, BinTree** root) {
+    FileInfo   info;
+    const char pref[] = FILE_PREFIX;
+
+    fread(&info, sizeof(FileInfo), 1, fileIn);
+
+    if ( memcmp(pref, &info.prefix, sizeof(s8) * 4) ) {
+        return FALSE; //check that 4-byte prefix == "HUFF"
+    }
+//TODO: set cursor to tree data
+    treeFromFile(fileIn, root);
+
+    return TRUE;
+}
+
 void pushOrdered(Stack* stack, BinTree* newNode) {
     BinTree* oldNode = NULL;
     u32      freq    = 0;
@@ -42,7 +86,7 @@ void pushOrdered(Stack* stack, BinTree* newNode) {
         return;
     }
 
-    //get frequence of the top element in the stack
+    //get frequency of the top element in the stack
     freq = binTreeIsLeaf(oldNode) ? ((Symbol*)oldNode->key.ptr)->freq
         : oldNode->key.val;
 
@@ -71,6 +115,104 @@ void createPath(BinTree* tree, int depth) { //create binary path to symbols
     createPath(tree->right, depth + 1);
 }
 
+void treeToFile(FILE* fileOut, BinTree* tree) {
+    //TODO: maybe 9-byte?
+    if ( !tree ) {
+        u8 buff = 0;
+
+        fwrite((const void*)&buff, sizeof(u8), 2, fileOut); //00 - indicates end of brunch
+    } else {
+        u8 buff = 1;
+
+        if ( binTreeIsLeaf(tree) ) {
+            fwrite( (const void*)&((Symbol*)tree->key.ptr)->sym, sizeof(char), 1, fileOut );
+            fwrite((const void*)&buff, sizeof(u8), 1, fileOut);
+        } else {
+            fwrite((const void*)&tree->key.val, sizeof(u8), 1, fileOut);
+            fwrite((const void*)&buff, sizeof(u8), 1, fileOut);
+        }
+
+        treeToFile(fileOut, tree->left);
+        treeToFile(fileOut, tree->right);
+    }
+}
+
+void treeFromFile(FILE* fileIn, BinTree** tree) {
+    s8 byte[2];
+
+    fread((void*)&byte[0], sizeof(s8), 1, fileIn);
+    if ( byte[0] == EOF ) {
+        return;
+    }
+
+    fread((void*)&byte[1], sizeof(s8), 1, fileIn);
+
+    if ( byte[1] != (s8)0 ) {
+        *tree = malloc(sizeof(BinTree));
+        binTreeInit(tree);
+        (*tree)->key.val = (u32)byte[1];
+
+        treeFromFile(fileIn, &((*tree)->left));
+        treeFromFile(fileIn, &((*tree)->right));
+    } else {
+        *tree = NULL;
+    }
+}
+
+u32 encodeFile(FILE* fileIn, FILE* fileOut, Symbol* symbols) {
+    //symbols[] - array of symbols from fileIn with filled "path" fields
+    BitMask mask;
+    int     i;
+    u32     count; //byte-blocks count
+
+    bitMaskInit(&mask);
+    while ( (i = fgetc(fileIn)) != EOF ) {
+        char* j = symbols[i].path;
+
+        while ( *j != '\0' ) {
+            if ( bitMaskIsFull(&mask) ) {
+                //if byte block is filled, writing it to file
+                fwrite((const void*)&mask.data, sizeof(u8), 1, fileOut);
+                bitMaskInit(&mask);
+                count++;
+            }
+
+            bitMaskAdd(&mask, (u8)(*j == '0' ? 0 : 1));
+            j++;
+        }
+    }
+    fwrite((const void*)&mask.data, sizeof(u8), 1, fileOut); //save last block
+    count++;
+
+    return count;
+}
+
+void decodeFile(FILE* fileIn, FILE* fileOut, u64 fileLen, const BinTree* root) {
+    BitMask   mask;
+    const BinTree*  temp = root;
+
+    bitMaskInit(&mask);
+
+    while ( fileLen > 0 ) {
+        int j;
+
+        fread((void*)&mask.data, sizeof(u8), 1, fileIn);
+        mask.pos  = 7;
+        for ( j = 0; j < 8 && fileLen > 0; j++ ) {
+            u8 tmp = bitMaskGet(&mask, j);
+
+            temp = tmp == (u8)0 ? temp->left : temp->right;
+
+            if ( binTreeIsLeaf(temp) ) {
+                fprintf(fileOut, "%c", ((Symbol*)temp->key.ptr)->sym);
+                //fprintf(fileOut, "%c", (s8)temp->key.val);
+                temp = root;
+                fileLen--;
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     FILE*   fileIn  = NULL;
     FILE*   fileOut = NULL;
@@ -83,8 +225,8 @@ int main(int argc, char** argv) {
     BinTree* temp[2];
     BinTree* root;
     Stack    stack;
-    BitMask  mask;
-    
+    //BitMask  mask;
+
     if ( argc < 3 ) {
         puts("Error: too few arguments.");
         return EXIT_FAIL;
@@ -96,13 +238,13 @@ int main(int argc, char** argv) {
     if ( !fileIn || !fileOut ) {
         fclose(fileIn);
         fclose(fileOut);
-        printf("Error: file %s or %s corrupted or doesn't exist.", 
+        printf("Error: file %s or %s corrupted or doesn't exist.",
             argv[1], argv[2]);
 
         return EXIT_FAIL;
     }
-    
-    stackInit(&stack);    
+
+    stackInit(&stack);
 
     for ( i = 0; i < ARRAY_LENGTH; i++ ) {
         symbols[i].sym  = (char)i;
@@ -135,7 +277,6 @@ int main(int argc, char** argv) {
     while ( stackPop(&stack, (void**)temp) &&
             stackPop(&stack, (void**)(temp+1)) ) {
         BinTree* newNode = NULL;
-        BinTree* oldNode = NULL;
 
         //and merge them into new node
         binTreeInit(&newNode);
@@ -149,7 +290,7 @@ int main(int argc, char** argv) {
         } else {
             newNode->key.val += newNode->left->key.val;
         }
-        
+
         //add right's frequencies
         if ( binTreeIsLeaf(newNode->right) ) {
             newNode->key.val += ((Symbol*)newNode->right->key.ptr)->freq;
@@ -162,57 +303,21 @@ int main(int argc, char** argv) {
     }
 
     root = temp[0]; //result tree in temp[0]
-    
+
     createPath(root, 0);
-    
-    fseek(fileIn, 0, SEEK_SET);
-    bitMaskInit(&mask);
-    while ( (i = fgetc(fileIn)) != EOF ) {
-        char* j = symbols[i].path;
 
-        while ( *j != '\0' ) {
-            if ( bitMaskIsFull(&mask) ) {
-                //fprintf(fileOut, "%c", (char)mask.data);
-                fwrite((const void*)&mask.data, sizeof(u8), 1, fileOut);
-                bitMaskInit(&mask);
-            }
+    fseek(fileIn, 0, SEEK_SET); //reset fileIn input stream
+    encodeFile(fileIn, fileOut, symbols);
 
-            bitMaskAdd(&mask, (u8)(*j == '0' ? 0 : 1));
-            j++;
-        }
-    }
-    if ( !bitMaskIsEmpty(&mask) ) {
-        fprintf(fileOut, "%c", (char)mask.data);
-    }
-    
-    bitMaskInit(&mask);
     fclose(fileOut);
     fclose(fileIn);
     fileOut = fopen(argv[2], "rb");
     fileIn  = fopen("temp", "wt");
-    temp[0] = root;
-    
-    while ( fileLen > 0 ) {        
-        int j;
 
-        fread((void*)&mask.data, sizeof(u8), 1, fileOut);
-        mask.pos  = 7;
-        for ( j = 0; j < 8 && fileLen > 0; j++ ) {
-            u8 tmp = bitMaskGet(&mask, j);
+    decodeFile(fileOut, fileIn, fileLen, root);
 
-            temp[0] = tmp == (u8)0 ? temp[0]->left : temp[0]->right;
-
-            if ( binTreeIsLeaf(temp[0]) ) {
-                fprintf(fileIn, "%c", ((Symbol*)temp[0]->key.ptr)->sym);
-                //fwrite((const void*)&mask.data, sizeof(u8), 1, temp);
-                temp[0] = root;
-                fileLen--;
-            }
-        }
-    }
-    
     binTreeRemove(root);
-    
+
     fclose(fileIn);
     fclose(fileOut);
     return EXIT_SUCCESS;
