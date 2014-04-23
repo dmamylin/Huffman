@@ -1,0 +1,4 @@
+1. Save tree data in 9-byte chunks, not in 16-byte. (main objective)
+2. Add some shell arguments.
+3. Rename some variables to get isotropic code (tree -> root).
+

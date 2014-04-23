@@ -88,13 +88,11 @@ int loadFromFile(FILE* fileIn) {
     }
 
     fgetpos(fileIn, &pos); //save data's position
-    fseek(fileIn, sizeof(u8) * (info.blocksCount + 1), SEEK_CUR); //go to the tree's data
+    fseek(fileIn, sizeof(u8) * info.blocksCount, SEEK_CUR); //go to the tree's data
     treeFromFile(fileIn, &root);
     fsetpos(fileIn, &pos); // return to data
 
-    puts("decoding started");
     decodeFile(fileIn, fileOut, info.fileLen, root);
-    puts("decoded successfully");
 
     fclose(fileOut);
     binTreeRemove(root);
@@ -118,7 +116,7 @@ void pushOrdered(Stack* stack, BinTree* newNode) {
     if ( newNode->key.val <= freq ) { //if newFreq <= oldFreq
         stackPush(stack, oldNode);
         stackPush(stack, newNode);
-        return; //push them in right order and stop
+        return; //push them with right order and stop
     } else {
         pushOrdered(stack, newNode); //push again to popped stack
         stackPush(stack, oldNode); //and push oldNode
@@ -142,45 +140,46 @@ void createPath(BinTree* tree, int depth) { //create binary path to symbols
 
 void treeToFile(FILE* fileOut, BinTree* tree) {
     //TODO: maybe 9-byte?
-    if ( !tree ) {
-        u8 buff = 0;
+    //tree format: [data][flag]; data & flag - 1 byte blocks
+    //data: data in node;
+    //flag: 0 => not a leaf; 1 => leaf
 
-        fwrite((const void*)&buff, sizeof(u8), 2, fileOut); //second 0 - indicates end of brunch
-    } else {
-        u8 buff = 1;
-
+    if ( tree ) { //works only on non-empty nodes
         if ( binTreeIsLeaf(tree) ) {
-            fwrite( (const void*)&((Symbol*)tree->key.ptr)->sym, sizeof(char), 1, fileOut );
+            u8 buff = 1;
+
+            //save data:
+            fwrite((const void*)&((Symbol*)tree->key.ptr)->sym, sizeof(char), 1, fileOut);
+            fwrite((const void*)&buff, sizeof(u8), 1, fileOut); //save flag
         } else {
-            fwrite((const void*)&tree->key.val, sizeof(u8), 1, fileOut);
+            u8 buff = 0;
+
+            //save arbitrary data and 0 flag:
+            fwrite((const void*)&buff, sizeof(u8), 1, fileOut);
+            fwrite((const void*)&buff, sizeof(u8), 1, fileOut); 
+            //fwrite((const void*)&buff, sizeof(u8), 2, fileOut); WTF!?
+
+            treeToFile(fileOut, tree->left);
+            treeToFile(fileOut, tree->right);
         }
-
-        fwrite((const void*)&buff, sizeof(u8), 1, fileOut);
-
-        treeToFile(fileOut, tree->left);
-        treeToFile(fileOut, tree->right);
     }
 }
 
 void treeFromFile(FILE* fileIn, BinTree** tree) {
-    s8 byte[2];
+    u8 byte[2];
 
     fread((void*)&byte[0], sizeof(s8), 1, fileIn);
-    if ( byte[0] == EOF ) {
+    /*if ( byte[0] == EOF ) {
         return;
-    }
-
+    }*/
     fread((void*)&byte[1], sizeof(s8), 1, fileIn);
 
-    if ( byte[1] != (s8)0 ) {
-        *tree = malloc(sizeof(BinTree));
-        binTreeInit(tree);
-        (*tree)->key.val = (u32)byte[1];
+    binTreeInit(tree);
+    (*tree)->key.val = (u32)byte[0];
 
-        treeFromFile(fileIn, &((*tree)->left));
-        treeFromFile(fileIn, &((*tree)->right));
-    } else {
-        *tree = NULL;
+    if ( byte[1] == (u8)0 ) {
+        treeFromFile(fileIn, &(*tree)->left);
+        treeFromFile(fileIn, &(*tree)->right);
     }
 }
 
@@ -280,25 +279,22 @@ int main(int argc, char** argv) {
 
     qsort(symbolsOrd, ARRAY_LENGTH, sizeof(Symbol*), compareSym);
 
-    //back order - to fill the stack
+    //converting each symbol to the tree's leaf and pushing it to stack
+    //back order - right order
     for ( i = ARRAY_LENGTH - 1; i >= 0; i-- ) {
         temp[0] = NULL;
 
         if ( symbolsOrd[i]->freq <= 0 ) {
-            break; //stop when non-zero frequencies appear
+            break; //stop when zero frequencies appear
         }
 
         binTreeInit(&temp[0]);
         temp[0]->key.ptr = (void*)symbolsOrd[i];
-        temp[0]->left = temp[0]->right = NULL;
 
         stackPush(&stack, (void*)temp[0]);
     } //stack will be filled from lessers(on top) to greatests
 
-    /*root = (BinTree*)malloc(sizeof(BinTree));
-    binTreeInit(&root);*/
-
-    //pushing 2 elements from stack, if it possible
+    //popping 2 elements from stack, if it possible
     //TODO: handle 1 element stacks and empty stacks (!!!!!!!)
     while ( stackPop(&stack, (void**)temp) &&
             stackPop(&stack, (void**)(temp+1)) ) {
@@ -338,15 +334,6 @@ int main(int argc, char** argv) {
     fclose(fileOut);
     fileOut = fopen(argv[2], "rb");
     loadFromFile(fileOut);
-
-    /*encodeFile(fileIn, fileOut, symbols);
-
-    fclose(fileOut);
-    fclose(fileIn);
-    fileOut = fopen(argv[2], "rb");
-    fileIn  = fopen("temp", "wt");
-
-    decodeFile(fileOut, fileIn, fileLen, root);*/
 
     binTreeRemove(root);
 
