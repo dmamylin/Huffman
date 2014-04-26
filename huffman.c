@@ -329,7 +329,7 @@ int main(int argc, char** argv) {
     createPath(root, 0);
 
     rewind(fileIn);
-    saveToFile(fileIn, fileOut, symbols, root, argv[2], fileLen);
+    saveToFile(fileIn, fileOut, symbols, root, argv[1], fileLen);
 
     fclose(fileOut);
     fileOut = fopen(argv[2], "rb");
