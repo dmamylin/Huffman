@@ -42,9 +42,6 @@ void treeFromFile(FILE* fileIn, BinTree** tree) {
     u8 byte[2];
 
     fread((void*)&byte[0], sizeof(s8), 1, fileIn);
-    /*if ( byte[0] == EOF ) {
-        return;
-    }*/
     fread((void*)&byte[1], sizeof(s8), 1, fileIn);
 
     binTreeInit(tree);

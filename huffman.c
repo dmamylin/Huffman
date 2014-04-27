@@ -13,10 +13,12 @@
 void initializeArrays(Symbol* symbols, Symbol** symbolsOrd, int len);
 int compareSym(const void*, const void*);
 
+//compare symbols s1 and s2. Uses in quick sort
 int compareSym(const void* s1, const void* s2) {
     return (*(Symbol**)s1)->freq - (*(Symbol**)s2)->freq;
 }
 
+//init symbols and symbolsOrd arrays
 void initializeArrays(Symbol* symbols, Symbol** symbolsOrd, int len) {
     int i;
 
@@ -34,7 +36,6 @@ int main(int argc, char** argv) {
     Symbol  symbols[ARRAY_LENGTH];
     Symbol* symbolsOrd[ARRAY_LENGTH]; //ordered pointers (by frequency)
 
-    int i;
     u64 fileLen = 0;
 
     BinTree* temp[2];
