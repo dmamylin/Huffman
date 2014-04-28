@@ -1,22 +1,22 @@
 #include "bitMask.h"
 
 void bitMaskInit(BitMask* mask) {
-    mask->pos  = -1;
-    mask->data = (u8)0;
+    mask->pos  = -1; //last filled position; position < 0 indicates empty mask
+    mask->data = (u8)0; //00000000 by default
 }
 
-void bitMaskAdd(BitMask* mask, u8 val) {
+void bitMaskAdd(BitMask* mask, u8 val) { //set current bit to val's state
     int i;
     u8  temp = (u8)(val > 0 ? 1 : 0);
 
     mask->pos++;
 
-    i = sizeof(mask->data) * BITS_IN_BYTE - 1 - mask->pos;
-    temp <<= i;
-    mask->data |= temp;
+    i = sizeof(mask->data) * BITS_IN_BYTE - 1 - mask->pos; //position of bit
+    temp <<= i; //shift: 0..01 -> 0..1..0
+    mask->data |= temp; //put new bit to the data
 }
 
-u8 bitMaskGet(BitMask* mask, int i) {
+u8 bitMaskGet(BitMask* mask, int i) { //get bit by current position
     u8  temp = (u8)1;
 
     i = sizeof(mask->data) * BITS_IN_BYTE - 1 - i;
@@ -24,13 +24,6 @@ u8 bitMaskGet(BitMask* mask, int i) {
     temp &= mask->data;
 
     return (u8)(temp > (u8)0 ? 1 : 0);
-}
-
-u8 bitMaskPop(BitMask* mask) {
-    u8 res = bitMaskGet(mask, sizeof(mask->data) * BITS_IN_BYTE - 1 - mask->pos);
-
-    mask->pos--;
-    return res;
 }
 
 int bitMaskIsFull(BitMask* mask) {

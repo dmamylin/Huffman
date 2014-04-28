@@ -12,8 +12,9 @@
 
 void initializeArrays(Symbol* symbols, Symbol** symbolsOrd, int len);
 int compareSym(const void*, const void*);
+void printHelp();
 
-//compare symbols s1 and s2. Uses in quick sort
+//compare symbols s1 and s2. Uses in quick sort function
 int compareSym(const void* s1, const void* s2) {
     return (*(Symbol**)s1)->freq - (*(Symbol**)s2)->freq;
 }
@@ -30,6 +31,12 @@ void initializeArrays(Symbol* symbols, Symbol** symbolsOrd, int len) {
     }
 }
 
+void printHelp() {
+    puts("-e (--encode) f1 f2 - compress file named f1 into archive named f2");
+    puts("-d (--decode) f1 [f2] - decompress archive named f1 [optional: into file named f2]");
+    puts("\tif name not specified, takes it from archive.");
+}
+
 int main(int argc, char** argv) {
     FILE*   fileIn  = NULL;
     FILE*   fileOut = NULL;
@@ -42,44 +49,82 @@ int main(int argc, char** argv) {
     BinTree* root;
     Stack    stack;
 
-    if ( argc < 3 ) {
-        puts("Error: too few arguments.");
+    if ( !argv[1] ) {
+        printHelp();
         return EXIT_FAIL;
     }
 
-    fileIn  = (FILE*)fopen(argv[1], "rt");
-    fileOut = (FILE*)fopen(argv[2], "wb");
+    if ( !strcmp(argv[1], "-e") || !strcmp("--encode", argv[1]) ) {
+        if ( !argv[2] || !argv[3] ) {
+            printHelp();
+            return EXIT_FAIL;
+        }
 
-    if ( !fileIn || !fileOut ) {
-        fclose(fileIn);
+        fileIn  = (FILE*)fopen(argv[2], "rt");
+        if ( !fileIn ) {
+            printf("Error: file <<%s>> doesn't exists\n", argv[2]);
+            return EXIT_FAIL;
+        }
+
+        stackInit(&stack);
+        initializeArrays(symbols, symbolsOrd, ARRAY_LENGTH);
+
+        fileLen = readFile(fileIn, symbols); //read symbols; first pass
+        if ( fileLen == 0 ) {
+            printf("Error: file <<%s>> is empty\n", argv[2]);
+            fclose(fileIn);
+            return EXIT_FAIL;
+        }
+
+        fileOut = (FILE*)fopen(argv[3], "wb");
+        if ( !fileOut ) {
+            printf("Error: cannot create file <<%s>>\n", argv[3]);
+            fclose(fileIn);
+            return EXIT_FAIL;
+        }
+
+        //sort symbols by frequencies from lower to greatest
+        qsort(symbolsOrd, ARRAY_LENGTH, sizeof(Symbol*), compareSym);
+        fillStack(symbolsOrd, &stack, ARRAY_LENGTH); //prepare stack
+
+        root = buildTree(&stack);
+
+        createPath(root, 0); //0 - starting depth
+
+        rewind(fileIn); //reopen fileIn; prepare second pass
+
+        //write all compressed data
+        saveToFile(fileIn, fileOut, symbols, root, argv[2], fileLen);
+
+        //memory cleanup
+        binTreeRemove(root);
+
         fclose(fileOut);
-        printf("Error: file %s or %s corrupted or doesn't exist.",
-            argv[1], argv[2]);
+        fclose(fileIn);
+    } else if ( !strcmp(argv[1], "-d") || !strcmp("--decode", argv[1]) ) {
+        if ( !argv[2] ) {
+            printHelp();
+            return EXIT_FAIL;
+        }
 
-        return EXIT_FAIL;
+        fileIn = fopen(argv[2], "rb");
+        if ( !fileIn ) {
+            printf("Error: file <<%s>> doesn't exists\n", argv[2]);
+            return EXIT_FAIL;
+        }
+
+        if ( !loadFromFile(fileIn, argv[3] ? argv[3] : NULL) ) {
+            printf("Error: file <<%s>> corrupted or cannot create file <<%s>>\n",
+                argv[2], argv[3]);
+            fclose(fileIn);
+            return EXIT_FAIL;
+        }
+
+        fclose(fileIn);
+    } else {
+        printHelp();
     }
+    
 
-    stackInit(&stack);
-    initializeArrays(symbols, symbolsOrd, ARRAY_LENGTH);
-    fileLen = readFile(fileIn, symbols);
-    qsort(symbolsOrd, ARRAY_LENGTH, sizeof(Symbol*), compareSym);
-
-    fillStack(symbolsOrd, &stack, ARRAY_LENGTH);
-
-    root = buildTree(&stack);
-
-    createPath(root, 0); //0 - starting depth
-
-    rewind(fileIn);
-    saveToFile(fileIn, fileOut, symbols, root, argv[1], fileLen);
-
-    fclose(fileOut);
-    fileOut = fopen(argv[2], "rb");
-    loadFromFile(fileOut);
-
-    binTreeRemove(root);
-
-    fclose(fileIn);
-    fclose(fileOut);
     return EXIT_SUCCESS;
 }

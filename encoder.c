@@ -1,55 +1,14 @@
 #include "encoder.h"
 
-//reading file and saving frequencies in array of symbols.
-//result - length of fyle in bytes
-u64 readFile(FILE* file, Symbol* symbols) {
-    int ch = 0;
-    u64 len = 0;
-
-    while ( (ch = fgetc(file)) != EOF ) {
-        symbols[ch].freq++;
-        len++;
-    }
-
-    return len;
-}
-
-//for each symbol from fileIn pack path into bit sequence and save it to the fileOut
-//symbols - filled array of symbols with their frequencies and path
-u32 encodeFile(FILE* fileIn, FILE* fileOut, Symbol* symbols) {
-    //symbols[] - array of symbols from fileIn with filled "path" fields
-    BitMask mask;
-    int     i;
-    u32     count = 0; //writed bytes count
-
-    bitMaskInit(&mask);
-    while ( (i = fgetc(fileIn)) != EOF ) {
-        char* j = symbols[i].path;
-
-        while ( *j != '\0' ) {
-            if ( bitMaskIsFull(&mask) ) {
-                //if byte block is filled, writes it to file
-                fwrite((const void*)&mask.data, sizeof(u8), 1, fileOut);
-                bitMaskInit(&mask); //clear byte block
-                count++;
-            }
-
-            bitMaskAdd(&mask, (u8)(*j == '0' ? 0 : 1));
-            j++;
-        }
-    }
-    fwrite((const void*)&mask.data, sizeof(u8), 1, fileOut); //save last block
-    count++;
-
-    return count;
-}
-
 /*fileIn - original file
-  fileOut - will be packed file
+  fileOut - output (compressed file)
   symbols - filled array of symbols with their frequencies and path
   tree - filled Huffman's tree
   name - name that will be stored in archive
-  len - lenght of file in bytes*/
+  len - lenght of file in bytes
+compressed file format: 
+[HUFF-prefix (4bytes)], [file length (8bytes)], [data blocks count (4bytes)],
+[length of filename (2bytes)], [filename], [dataBlocks], [treeData]*/
 void saveToFile(FILE* fileIn, FILE* fileOut, Symbol* symbols, BinTree* tree,
               const char* name, u64 len) {
     FileInfo info;
@@ -78,8 +37,55 @@ void saveToFile(FILE* fileIn, FILE* fileOut, Symbol* symbols, BinTree* tree,
     treeToFile(fileOut, tree);
 }
 
+/*read file and save frequencies in array of symbols.
+result - length of file in bytes
+file (stream) position is modifiable (!!!)*/
+u64 readFile(FILE* file, Symbol* symbols) {
+    int ch = 0;
+    u64 len = 0;
+
+    while ( (ch = fgetc(file)) != EOF ) {
+        symbols[ch].freq++;
+        len++;
+    }
+
+    return len;
+}
+
+/*for each symbol from "fileIn" compress path into bit sequence and save it to 
+the "fileOut", where "symbols" - filled array of symbols with their frequencies and path
+result - number of written bytes
+file (stream) position is modifiable (!!!)*/
+u32 encodeFile(FILE* fileIn, FILE* fileOut, Symbol* symbols) {
+    //symbols[] - array of symbols from fileIn with filled "path" fields
+    BitMask mask;
+    int     i;
+    u32     count = 0; //writed bytes count
+
+    bitMaskInit(&mask);
+    while ( (i = fgetc(fileIn)) != EOF ) { //for each symbol in fileIn
+        char* j = symbols[i].path; //path - null-terminated string of 1's and 0's
+
+        while ( *j != '\0' ) { 
+            if ( bitMaskIsFull(&mask) ) { //if byte block is filled, write it to file
+                fwrite((const void*)&mask.data, sizeof(u8), 1, fileOut);
+                bitMaskInit(&mask); //clear byte block
+                count++;
+            }
+
+            bitMaskAdd(&mask, (u8)(*j == '0' ? 0 : 1));
+            j++;
+        }
+    }
+    fwrite((const void*)&mask.data, sizeof(u8), 1, fileOut); //save last block
+    count++;
+
+    return count;
+}
+
 //create binary path to symbols in tree
 void createPath(BinTree* tree, int depth) {
+    //recursion + static variable = powerful trick
     static char temp[ARRAY_LENGTH]; //temporary path
 
     if ( binTreeIsLeaf(tree) ) {
@@ -88,6 +94,7 @@ void createPath(BinTree* tree, int depth) {
         return;
     }
 
+    //repeat recursively
     temp[depth] = '0'; //0 - left branch
     createPath(tree->left, depth + 1);
 
@@ -95,7 +102,8 @@ void createPath(BinTree* tree, int depth) {
     createPath(tree->right, depth + 1);
 }
 
-//saving binary tree "tree" to the file "fileOut"
+/*save binary tree to the file
+file (stream) position is modifiable (!!!)*/
 void treeToFile(FILE* fileOut, BinTree* tree) {
     //tree format: [data][flag]; data & flag - 1 byte blocks
     //data: data in node;
@@ -111,42 +119,18 @@ void treeToFile(FILE* fileOut, BinTree* tree) {
         } else {
             u8 buff = 0;
 
-            //save arbitrary data and 0 flag:
+            //save arbitrary data and 0 (not a leaf) flag:
             fwrite((const void*)&buff, sizeof(u8), 1, fileOut); //data
             fwrite((const void*)&buff, sizeof(u8), 1, fileOut); //flag
 
+            //repeat recursively
             treeToFile(fileOut, tree->left);
             treeToFile(fileOut, tree->right);
         }
     }
 }
 
-/*pushing node of bin tree to the stack and restore order (from lesser on top to
-greatest in bottom)*/
-void pushOrdered(Stack* stack, BinTree* newNode) {
-    BinTree* oldNode = NULL;
-    u32      freq    = 0;
-
-    if ( !stackPop(stack, (void**)&oldNode) ) {
-        stackPush(stack, (void*)newNode);
-        return;
-    }
-
-    //get frequency of the top element in the stack
-    freq = binTreeIsLeaf(oldNode) ? ((Symbol*)oldNode->key.ptr)->freq
-        : oldNode->key.val;
-
-    if ( newNode->key.val <= freq ) { //if newFreq <= oldFreq
-        stackPush(stack, oldNode);
-        stackPush(stack, newNode);
-        return; //push them with right order and stop
-    } else {
-        pushOrdered(stack, newNode); //push again to popped stack
-        stackPush(stack, oldNode); //and push oldNode
-    }
-}
-
-//converting each symbol with non-zero frequency into tree's leaf and pushing it to stack
+//convert each symbol with non-zero frequency into tree's leaf and push it to stack
 void fillStack(Symbol** symbolsOrd, Stack* stack, int len) {
     int i;
     BinTree* temp;
@@ -165,9 +149,12 @@ void fillStack(Symbol** symbolsOrd, Stack* stack, int len) {
     } //stack will be filled from lessers(on top) to greatests
 }
 
-//building tree by stack of leafs. Result - pointer on a new tree
+/*build tree by stack of leafs. 
+result - pointer on the new tree*/
 BinTree* buildTree(Stack* stack) {
     BinTree* temp[2];
+
+    temp[0] = temp[1] = NULL;
 
     //pop 2 elements from stack, while possible
     while ( stackPop(stack, (void**)temp) &&
@@ -199,4 +186,29 @@ BinTree* buildTree(Stack* stack) {
     }
 
     return temp[0]; //result (tree pointer) in temp[0]
+}
+
+/*push node of bin tree to the stack and restore order (from lesser on top to
+greatest in bottom)*/
+void pushOrdered(Stack* stack, BinTree* newNode) {
+    BinTree* oldNode = NULL;
+    u32      freq    = 0;
+
+    if ( !stackPop(stack, (void**)&oldNode) ) {
+        stackPush(stack, (void*)newNode);
+        return;
+    }
+
+    //get frequency of the top element in the stack
+    freq = binTreeIsLeaf(oldNode) ? ((Symbol*)oldNode->key.ptr)->freq
+        : oldNode->key.val;
+
+    if ( newNode->key.val <= freq ) { //if newFreq <= oldFreq
+        stackPush(stack, oldNode);
+        stackPush(stack, newNode);
+        return; //push them with right order and stop
+    } else {
+        pushOrdered(stack, newNode); //push again to popped stack
+        stackPush(stack, oldNode); //and push oldNode
+    }
 }

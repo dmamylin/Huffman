@@ -13,7 +13,6 @@ typedef struct BitMask {
 void bitMaskInit(BitMask* mask);
 void bitMaskAdd(BitMask* mask, u8 val);
 u8   bitMaskGet(BitMask* mask, int i);
-u8   bitMaskPop(BitMask* mask);
 int  bitMaskIsFull(BitMask* mask);
 int  bitMaskIsEmpty(BitMask* mask);
 

@@ -27,15 +27,3 @@ int binTreeInit(BinTree** root) {
 int binTreeIsLeaf(const BinTree* root) {
     return root && !root->left && !root->right;
 }
-
-#include <stdio.h>
-void binTreePrint(const BinTree* root, s32 inChar) {
-    if ( binTreeIsLeaf(root) ) {
-        inChar ? printf(" <%c> ", (char)root->key.val) :
-                 printf(" <%u> ", (u32)root->key.val);
-    } else {
-        printf(" %s ", "<NODE>");
-        binTreePrint(root->left, inChar);
-        binTreePrint(root->right, inChar);
-    }
-}
